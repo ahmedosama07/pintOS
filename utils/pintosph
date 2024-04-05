@@ -1,0 +1,87 @@
+#!/usr/bin/perl
+
+# Define color codes for console output
+$green = "\033[32m";
+$red = "\033[31m";
+$yellow = "\033[33m";
+$blue = "\033[34m";
+$bold = "\033[1m";
+$reset = "\033[0m";
+$invert = "\033[7m";
+
+# Print separator line
+print "$invert================================================\n\n$reset";
+# Print header
+print $bold . "--CC7 Colorados--\n\n" . $reset;
+
+# Check if the provided $shell matches the expected $name
+sub check_shell {
+    local($shell, $name) = @_;
+    return (($shell =~ s/$name/gbenm/r) cmp $shell) != 0;
+}
+
+# Get the user who executed the command
+my $ppid = getppid();
+my $shell = `ps --no-headers -o cmd $ppid`;
+$shell = `which $shell`;
+
+# Determine which file to modify
+if (check_shell($shell, 'bash')) {
+    $shrc = "$ENV{HOME}/.bashrc";
+} elsif (check_shell($shell, 'zsh')) {
+    $shrc = "$ENV{HOME}/.zshrc";
+} else {
+    # Print error message for unsupported shells
+    print $red . "Bash and Zsh are supported, add a new condition to pintosph if you have neither of them.\n";
+    exit;
+}
+
+# Print the file to be modified
+print $blue."File to modify $bold$shrc$reset\n\n";
+
+# Open the file for reading and writing
+open FH, '+<', $shrc or die "Cannot open $shrc -- $!";
+
+my $buffer = '';
+my $backup = undef;
+
+# Read line by line from the file
+while (<FH>) {
+    if ($_ =~ m/PINTOSPH=\".*\" # stop\@000001/) {
+        # Replace the existing PINTOSPH value with the provided argument
+        $buffer = $buffer . $_ =~ s/\".*\"/\"$ARGV[0]\"/r;
+        if (!$backup) {
+            $backup = 1;
+        }
+    } else {
+        $buffer = $buffer . $_;
+    }
+}
+
+# If the backup is created, update the file content and print success message
+if ($backup != undef) {
+    seek FH, 0, 0;
+    print FH $buffer;
+    truncate FH, length($buffer);
+
+    print $yellow . "-- Match line!\n". $green.$bold;
+    system "cat $shrc | grep '# stop\@000001'";
+    print $reset;
+
+    print "\n$bold"."IMPORTANT:$reset This is a new $bold$blue $shell$reset";
+    print " so to revert to the previous instance\n";
+    print "you'll need to execute ${blue}${bold}exit${reset}.\n\n";
+
+    print "$invert================================================\n$reset";
+    close FH;
+    system($shell);
+} else {
+    # If no backup is created, print error message and instructions to add necessary lines to the file
+    print "${red}${bold}No match line!${reset}\n\n";
+    print "Please add the following lines to ${blue}${shrc}${yellow}${bold}:\n\n";
+    print "PINTOSPH=\"\" # stop\@000001\n";
+    print "export PINTOSPH\n\n";
+    print "${reset}$invert================================================\n$reset";
+    close FH;
+}
+
