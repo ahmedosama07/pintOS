@@ -1,0 +1,14 @@
+name: 'pintos-result'
+description: "Check the results"
+
+inputs:
+  results:
+    required: true
+    description: "The results of the phase"
+  phase:
+    required: true
+    description: "The phase you are working on"
+
+runs:
+  using: "node16"
+  main: "index.js"

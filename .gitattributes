@@ -1,0 +1,2 @@
+*.pl   diff=perl whitespace=ignore-space
+*.c    diff=c whitespace=ignore-space
