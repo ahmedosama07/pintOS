@@ -85,15 +85,26 @@ timer_elapsed (int64_t then)
 }
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
-   be turned on. */
+   be turned on. 
+   
+   Checking if ticks<= 0 to cover the case if number of ticks entered
+   is invalid. Calling thread_sleep(start + ticks) passing to it
+   the ticks required and current counted ticks*/
 void
 timer_sleep (int64_t ticks) 
 {
+  if (ticks <= 0)
+    return;
+    
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  enum intr_level old_level = intr_disable ();
+  
+  thread_sleep(start + ticks);
+
+  intr_set_level (old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -166,11 +177,16 @@ timer_print_stats (void)
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
-/* Timer interrupt handler. */
+/* Timer interrupt handler. 
+Adding thread_awake() here to check if there's any thread
+ready to be awaked after each tick.*/
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+
+  thread_awake();
+
   thread_tick ();
 }
 
