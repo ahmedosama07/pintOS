@@ -100,11 +100,12 @@ timer_sleep (int64_t ticks)
 
   ASSERT (intr_get_level () == INTR_ON);
 
-  enum intr_level old_level = intr_disable ();
-  
-  thread_sleep(start + ticks);
-
-  intr_set_level (old_level);
+  thread_current ()->wait_ticks = ticks + start;
+  enum intr_level old_level;
+  old_level = intr_disable ();
+  thread_sleep();
+  thread_block();
+  intr_set_level(old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be

@@ -88,6 +88,8 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int initial_priority;
+    int donated_priority;
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
@@ -95,6 +97,9 @@ struct thread
     struct list_elem sleepelem;          /* List element for sleeping threads*/
 
     int16_t wait_ticks;                 /* Number of ticks to be waiting for*/
+    struct list waiters;                  /* List of locks held by this thread */
+    struct lock *lock_waiting;          /* Lock this thread is waiting for */
+    struct list_elem waiterelem;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -141,7 +146,12 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
-void thread_sleep (uint16_t local_thread_ticks);
+void thread_sleep ();
 void thread_awake();
+bool sleep_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux);
+bool priority_more (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux);
+struct thread* thread_idle(void);
+void thread_donate_priority(struct thread*, int);
+int max(int, int);
 
 #endif /* threads/thread.h */
