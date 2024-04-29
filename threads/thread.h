@@ -4,6 +4,16 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
+#include "threads/fixed-point.h"
+
+static inline int max(int a, int b) {
+  return a > b ? a : b;
+}
+
+static inline int min(int a, int b) {
+  return a < b ? a : b;
+}
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +33,13 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/* Scheduler types. */
+#define BSD_SCHEDULER true
+#define PRIORITY_SCHEDULER false
+
+/* Mulrilevel priority donations. */
+#define PRIORITY_DONATION_MAX_LEVEL 8
 
 /* A kernel thread or user process.
 
@@ -88,10 +105,22 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int donated_priority;               /* Priority to be donated. */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+
+    int64_t wait_ticks;                   /* Number of ticks to be waiting for*/
+    struct list waiters;                  /* List of locks held by this thread */
+    struct lock *lock_waiting;            /* Lock this thread is waiting for. */
+    struct condition *wait_cond;          /* Condition the thread is waiting for. */
+    struct semaphore_elem *wait_cond_elem;/* Semaphore element for the thread waiting for condition. */
+
+    struct list *sem_list;
+
+    int niceness;
+    real_t recent_cpu;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -137,5 +166,21 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+/* Alarm. */
+void thread_sleep(int64_t local_thread_ticks);
+void thread_awake(int64_t ticks);
+bool thread_sleep_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux);
+bool thread_priority_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux);
+bool is_thread_prior(struct thread *t1, struct thread *t2);
+void is_time_slice_end(void);
+
+/* Schedulers. */
+void threads_update_statistics(bool);
+bool locks_priority_comp(const struct list_elem*, const struct list_elem*, void* UNUSED);
+void thread_add_to_acquired_locks(struct lock*);
+void thread_remove_from_acquired_locks(struct lock*);
+void bsd_recalc_priority(void);
+void yield_on_max_priority(void);
 
 #endif /* threads/thread.h */
