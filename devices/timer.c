@@ -96,15 +96,10 @@ timer_sleep (int64_t ticks)
   if (ticks <= 0)
     return;
     
-  int64_t start = timer_ticks ();
-
   ASSERT (intr_get_level () == INTR_ON);
-
-  thread_current ()->wait_ticks = ticks + start;
   enum intr_level old_level;
   old_level = intr_disable ();
-  thread_sleep();
-  thread_block();
+  thread_sleep(timer_ticks() + ticks);
   intr_set_level(old_level);
 }
 
@@ -186,8 +181,16 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
 
-  thread_awake();
+  if(thread_mlfqs == BSD_SCHEDULER)
+  {
+    threads_update_statistics((timer_ticks() % TIMER_FREQ) == 0);
 
+    if(timer_ticks() % 4 == 0)
+      bsd_recalc_priority();
+  }
+
+  is_time_slice_end();
+  thread_awake(ticks);
   thread_tick ();
 }
 
