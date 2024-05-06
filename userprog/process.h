@@ -18,8 +18,19 @@ struct process_control_block
     struct list_elem elem;
     char *commands;
 
+    bool waiting;
+    bool exited;
+    bool orphan;
+    int exitcode;
+
     struct semaphore sema_initialization;  
     struct semaphore sema_wait;
 };
 
+struct file_descriptor
+{
+  int id;
+  struct list_elem elem;
+  struct file* file;
+};
 #endif /* userprog/process.h */

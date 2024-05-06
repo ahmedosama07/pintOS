@@ -35,6 +35,7 @@ process_execute (const char *command_line) // was file_name
   struct process_control_block *pcb = NULL;
   tid_t tid;
 
+  /* Get a copy of the commands */
   cmd_copy = palloc_get_page (0);
   if (cmd_copy == NULL)
     return TID_ERROR;
@@ -42,6 +43,7 @@ process_execute (const char *command_line) // was file_name
   strlcpy (cmd_copy, command_line, PGSIZE);
 
 
+  /* Save a copy of commands and tokenize the filename */
   file_name = palloc_get_page (0);
   if (file_name == NULL)
     return TID_ERROR;
@@ -49,19 +51,27 @@ process_execute (const char *command_line) // was file_name
   strlcpy (file_name, command_line, PGSIZE);  
   file_name = strtok_r (command_line, " ",&save_ptr);
 
+
+  /* Initialize the PCB of the new process (semaphores too)*/
   pcb->pid = 0;
   pcb->parent = thread_current();
   pcb->commands = command_line;
+  pcb->waiting = false;
+  pcb->exited = 0;
+  pcb->orphan = 0;
+  pcb->exitcode = -1;
 
   sema_init(&pcb->sema_initialization, 0);
   sema_init(&pcb->sema_wait, 0);
 
+  /* Create the kernel thread for the new process */
   tid = thread_create(file_name, PRI_DEFAULT, start_process, pcb); 
 
-  sema_down(&pcb->sema_initialization);
+  sema_down(&pcb->sema_initialization); // Wait for the initialization at the thread function (start_process)
 
+  /* Check if the thread already initialized by checking its pid and return it */
   if (pcb->pid > 0)
-    list_push_back(&(thread_current()->child_list), &(pcb->elem));
+    list_push_back(&(thread_current()->child_list), &(pcb->elem)); // Push the process into the child list of the parent
 
   return pcb->pid;
 }
@@ -71,6 +81,7 @@ process_execute (const char *command_line) // was file_name
 static void
 start_process (void *pcb_)
 {
+  /* Tokenize the command into separated words */
   struct process_control_block *pcb = pcb_;
   char *file_name = pcb->commands;
 
@@ -80,9 +91,7 @@ start_process (void *pcb_)
   char* save_ptr = NULL;
   int counter = 0;
   for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
-  {
     command_separat[counter++] = token;
-  }
 
 
   struct intr_frame if_;
@@ -95,9 +104,10 @@ start_process (void *pcb_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
+  /* Pushing the arguments onto the user program stack */
   push_arguments (command_separat, counter, &if_.esp);
 
-  thread_current()->pcb = pcb;
+  thread_current()->pcb = pcb; // Set the PCB of the process
 
   palloc_free_page (command_separat);
   if (!success) 
@@ -123,21 +133,92 @@ start_process (void *pcb_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  return -1;
+  struct process_control_block *childs_pcb = NULL;
+  struct list *child_list = thread_current()->child_list;
+
+  /* Search for the child given its tid in the children list
+     in the parent structure */
+  struct list_elem *loop = NULL; 
+  if (!list_empty(child_list))
+  {
+   for (loop = list_front(child_list); loop != list_end(child_list); loop = list_next(loop)) 
+   {
+     struct process_control_block *loop_childs_pcb = list_entry(loop, struct process_control_block, elem);
+
+     if (loop_childs_pcb->pid == child_tid)
+       childs_pcb = loop_childs_pcb;
+     break;  
+   }
+  }
+  list_remove (loop);
+
+  /* If not found then, error */
+  if (childs_pcb == NULL)
+    return -1; 
+
+  /* If found but it is already waiting or finished then, error */
+  if (childs_pcb->waiting || childs_pcb->exited)
+    return -1;
+
+  /* Set waiting state and down the semaphore */
+  childs_pcb->waiting = true;
+  sema_down(&childs_pcb->sema_wait);
+
+  /* Return exit code */
+  int exit_code = childs_pcb->exitcode;
+  palloc_free_page(childs_pcb);
+
+  return exit_code;
 }
 
 /* Free the current process's resources. */
 void
 process_exit (void)
 {
-  struct thread *cur = thread_current ();
-  uint32_t *pd;
+  /* Clean each file descriptor in the list of the process*/
+  struct list *file_des_list = thread_current ()->file_des;
+  while (!list_empty(file_des_list))
+  {
+    struct list_elem *file_des_elem = list_pop_front(file_des_list);
+    struct file_descriptor *file_des = list_entry(file_des_elem, struct file_descriptor, elem);
+
+    file_close(file_des->file);
+    palloc_free_page(file_des);
+  }
+
+  /* Check the children status and clean PCB objects */
+  struct list *childs_list = thread_current ()->child_list;
+  while (!list_empty(childs_list))
+  {
+    struct list_elem *loop = list_pop_front(childs_list);
+    struct process_control_block *pcb = list_entry(loop, struct process_control_block, elem);
+    if (pcb->exited)
+      palloc_free_page (pcb);
+    else
+    {
+      pcb->orphan = true;  
+      pcb->parent = NULL;
+    }  
+  }
+
+  /* Close all ELF executable files */
+  file_allow_write(thread_current ()->elf_file);
+  file_close(thread_current ()->elf_file);
+
+  /* After exiting the process, wake the parent*/
+  thread_current ()->pcb->exited = true;
+  sema_up (&thread_current ()->pcb->sema_wait);
+
+
+  /* Free the process' PCB */
+  palloc_free_page (&thread_current ()->pcb);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
-  pd = cur->pagedir;
+  uint32_t *pd;
+  pd = thread_current ()->pagedir;
   if (pd != NULL) 
     {
       /* Correct ordering here is crucial.  We must set
@@ -147,7 +228,7 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
-      cur->pagedir = NULL;
+      thread_current ()->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
@@ -345,8 +426,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
-  //file_deny_write (file);
-  //thread_current()->executing_file = file;
+  file_deny_write (file);
+  thread_current()->elf_file = file;
 
   success = true;
 
@@ -543,5 +624,4 @@ push_arguments (const char* command_separated[], int argc, void **esp)
   // setting fake ret addr to NULL
   *esp -= 4;
   *(int*) *esp = 0;
-
 }
