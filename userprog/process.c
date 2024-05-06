@@ -20,37 +20,71 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static void push_arguments (const char* cmdline_tokens[], int argc, void **esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *command_line) // was file_name
 {
-  char *fn_copy;
+  char *file_name = NULL;
+  char *cmd_copy = NULL;
+  char *save_ptr = NULL;
+  struct process_control_block *pcb = NULL;
   tid_t tid;
 
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  cmd_copy = palloc_get_page (0);
+  if (cmd_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
-  return tid;
+  strlcpy (cmd_copy, command_line, PGSIZE);
+
+
+  file_name = palloc_get_page (0);
+  if (file_name == NULL)
+    return TID_ERROR;
+
+  strlcpy (file_name, command_line, PGSIZE);  
+  file_name = strtok_r (command_line, " ",&save_ptr);
+
+  pcb->pid = 0;
+  pcb->parent = thread_current();
+  pcb->commands = command_line;
+
+  sema_init(&pcb->sema_initialization, 0);
+  sema_init(&pcb->sema_wait, 0);
+
+  tid = thread_create(file_name, PRI_DEFAULT, start_process, pcb); 
+
+  sema_down(&pcb->sema_initialization);
+
+  if (pcb->pid > 0)
+    list_push_back(&(thread_current()->child_list), &(pcb->elem));
+
+  return pcb->pid;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *pcb_)
 {
-  char *file_name = file_name_;
+  struct process_control_block *pcb = pcb_;
+  char *file_name = pcb->commands;
+
+  char **command_separat = (char **)palloc_get_page(0);
+
+  char* token = NULL;
+  char* save_ptr = NULL;
+  int counter = 0;
+  for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+  {
+    command_separat[counter++] = token;
+  }
+
+
   struct intr_frame if_;
   bool success;
 
@@ -61,8 +95,11 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
+  push_arguments (command_separat, counter, &if_.esp);
+
+  thread_current()->pcb = pcb;
+
+  palloc_free_page (command_separat);
   if (!success) 
     thread_exit ();
 
@@ -308,6 +345,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
+  //file_deny_write (file);
+  //thread_current()->executing_file = file;
+
   success = true;
 
  done:
@@ -462,4 +502,46 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+static void
+push_arguments (const char* command_separated[], int argc, void **esp)
+{
+  void* arg_addresses[argc];
+  
+  int len = 0;
+  for (int i = 0; i < argc; i++)
+  {
+    len = strlen(command_separated[i]) + 1;
+    *esp -= len;
+    memcpy(*esp, command_separated[i], len);
+    arg_addresses[i] = *esp;
+  }
+
+  // padding
+  *esp = (void*)((unsigned int)(*esp) & 0xfffffffc);
+
+  // last null
+  *esp -= 4;
+  *(int*) *esp = 0;
+
+  // store each arg address
+  for (int i = argc - 1; i >= 0; i--)
+  {
+    *esp -= 4;
+    *(void**) *esp = arg_addresses[i];
+  }
+
+  // store argv
+  *esp -= 4;
+  *(void**) *esp = *esp + 4;
+
+  // store argc
+  *esp -= 4;
+  *(int*) *esp = argc;
+
+  // setting fake ret addr to NULL
+  *esp -= 4;
+  *(int*) *esp = 0;
+
 }
