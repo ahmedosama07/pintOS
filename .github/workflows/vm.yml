@@ -2,6 +2,8 @@ name: 'Qualification of vm phase'
 
 on:
   push:
+    branches:
+        - vm
   pull_request:
     branches:
       - vm

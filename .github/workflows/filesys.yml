@@ -2,6 +2,8 @@ name: 'Qualification of filesys phase'
 
 on:
   push:
+    branches:
+        - filesys
   pull_request:
     branches:
       - filesys

@@ -2,6 +2,8 @@ name: 'Qualification of userprog phase'
 
 on:
   push:
+    branches:
+        - userprog
   pull_request:
     branches:
       - userprog

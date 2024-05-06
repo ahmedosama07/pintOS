@@ -2,6 +2,8 @@ name: 'Qualification of threads phase'
 
 on:
   push:
+    branches:
+        - threads
   pull_request:
     branches:
       - threads
