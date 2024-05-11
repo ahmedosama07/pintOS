@@ -136,7 +136,7 @@ int
 process_wait (tid_t child_tid) 
 {
   struct process_control_block *childs_pcb = NULL;
-  struct list *child_list = thread_current()->child_list;
+  struct list *child_list = &thread_current()->child_list;
 
   /* Search for the child given its tid in the children list
      in the parent structure */
@@ -178,7 +178,7 @@ void
 process_exit (void)
 {
   /* Clean each file descriptor in the list of the process*/
-  struct list *file_des_list = thread_current ()->file_des;
+  struct list *file_des_list = &thread_current ()->file_des;
   while (!list_empty(file_des_list))
   {
     struct list_elem *file_des_elem = list_pop_front(file_des_list);
@@ -189,7 +189,7 @@ process_exit (void)
   }
 
   /* Check the children status and clean PCB objects */
-  struct list *childs_list = thread_current ()->child_list;
+  struct list *childs_list = &thread_current ()->child_list;
   while (!list_empty(childs_list))
   {
     struct list_elem *loop = list_pop_front(childs_list);
