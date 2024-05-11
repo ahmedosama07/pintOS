@@ -1,0 +1,37 @@
+name: 'Qualification of threads phase'
+
+on:
+  push:
+    branches:
+        - threads
+  pull_request:
+    branches:
+      - threads
+
+jobs:
+  threads:
+    name: 'Phase: Threads'
+    runs-on: 'ubuntu-latest'
+    env:
+      phase: 'threads'
+    steps:
+      - name: 'Cloning repository'
+        uses: 'actions/checkout@v2'
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install qemu
+          sudo ln -s /usr/bin/qemu-system-i386 /usr/bin/qemu
+      - name: Pintos Checker
+        id: phase
+        uses: gbenm/pintos-checker@v1
+        with:
+            phase: "${{ env.phase }}"
+            root: "."
+            utils_path: "utils"
+            make: "make clean && make && make grade"
+      - name: 'Show results'
+        uses: './.github/pintos-results'
+        with:
+          results: "${{ steps.phase.outputs.results }}"
+          phase: "${{ env.phase }}"

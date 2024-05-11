@@ -9,15 +9,10 @@ $bold = "\033[1m";
 $reset = "\033[0m";
 $invert = "\033[7m";
 
-# Print separator line
-print "$invert================================================\n\n$reset";
-# Print header
-print $bold . "--CC7 Colorados--\n\n" . $reset;
-
 # Check if the provided $shell matches the expected $name
 sub check_shell {
     local($shell, $name) = @_;
-    return (($shell =~ s/$name/gbenm/r) cmp $shell) != 0;
+    return (($shell =~ s/$name/ahmed/r) cmp $shell) != 0;
 }
 
 # Get the user who executed the command
