@@ -125,6 +125,10 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct list child_list;
+    struct process_control_block *pcb;
+    struct list file_des;
+    struct file *elf_file;
 #endif
 
     /* Owned by thread.c. */
