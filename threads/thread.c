@@ -152,6 +152,7 @@ and insert this thread in blocked_list and block it*/
 void
 thread_sleep (int64_t local_thread_ticks)
 {
+  ASSERT(intr_get_level() == INTR_OFF);
   struct thread *t = thread_current();
   t->wait_ticks = local_thread_ticks;
   list_insert_ordered(&blocked_list, &t->elem, &thread_sleep_compare, NULL);
@@ -704,7 +705,7 @@ allocate_tid (void)
 /*To insert sleeping threads ordered using list_insert_ordered 
 as it needs list_less_func * to compare the waiting time and insert*/
 bool
-thread_sleep_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux)
+thread_sleep_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux UNUSED)
 {
   ASSERT(t1_elem != NULL && t2_elem != NULL);
   const struct thread *t1 = list_entry (t1_elem, struct thread, elem);
@@ -718,7 +719,7 @@ thread_sleep_compare (const struct list_elem *t1_elem, const struct list_elem *t
 /*To insert ready threads ordered using list_insert_ordered 
 as it needs list_less_func * to compare the priority and insert*/
 bool
-thread_priority_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux)
+thread_priority_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux UNUSED)
 {
   ASSERT(t1_elem != NULL && t2_elem != NULL);
   const struct thread *t1 = list_entry (t1_elem, struct thread, elem);
@@ -740,6 +741,7 @@ locks_priority_comp(const struct list_elem *l1_elem, const struct list_elem *l2_
 
 void yield_on_max_priority(void)
 {
+  if (intr_context()) return;
   enum intr_level old_level = intr_disable();
   if(!list_empty(&ready_list) && is_thread_prior(list_entry(list_front(&ready_list), struct thread, elem), thread_current()))
     thread_yield();
@@ -747,7 +749,7 @@ void yield_on_max_priority(void)
 }
 
 bool
-is_thread_prior(struct thread *t1, struct thread *t2) {
+is_thread_prior(const struct thread *t1, const struct thread *t2) {
   int t1_priority = (t1->donated_priority != -1? t1->donated_priority : t1->priority);
   int t2_priority = (t2->donated_priority != -1? t2->donated_priority : t2->priority);
   return (t1_priority == t2_priority? false : t1_priority > t2_priority);

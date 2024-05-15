@@ -408,7 +408,7 @@ cond_broadcast (struct condition *cond, struct lock *lock)
 
 
 bool 
-semaphore_priority_compare(const struct list_elem *l1_elem, const struct list_elem *l2_elem, void *aux)
+semaphore_priority_compare(const struct list_elem *l1_elem, const struct list_elem *l2_elem, void *aux UNUSED)
 {
   ASSERT(l1_elem != NULL && l2_elem != NULL);
   struct thread *t1 = list_entry(l1_elem, struct semaphore_elem, elem)->waiting_thread;

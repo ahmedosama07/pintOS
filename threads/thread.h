@@ -174,9 +174,9 @@ int thread_get_load_avg (void);
 /* Alarm. */
 void thread_sleep(int64_t local_thread_ticks);
 void thread_awake(int64_t ticks);
-bool thread_sleep_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux);
-bool thread_priority_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux);
-bool is_thread_prior(struct thread *t1, struct thread *t2);
+bool thread_sleep_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void* UNUSED);
+bool thread_priority_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void* UNUSED);
+bool is_thread_prior(const struct thread *t1, const struct thread *t2);
 void is_time_slice_end(void);
 
 /* Schedulers. */

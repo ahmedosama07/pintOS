@@ -53,7 +53,7 @@ void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
-bool semaphore_priority_compare(const struct list_elem *l1_elem, const struct list_elem *l2_elem, void *aux);
+bool semaphore_priority_compare(const struct list_elem *l1_elem, const struct list_elem *l2_elem, void* UNUSED);
 
 /* Optimization barrier.
 
