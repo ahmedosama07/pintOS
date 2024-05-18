@@ -461,6 +461,12 @@ read_handler (struct intr_frame *f)
     f->eax = read(descriptor, buffer, size);
 }
 
+/* Write System Call Handler:
+   Handles the write system call, which writes data to a file descriptor.
+   This function retrieves arguments from the interrupt frame and passes them to the write function.
+   It also performs validity checks on the buffer pointer and the file descriptor.
+   If the buffer pointer is invalid or the file descriptor is for standard input (0), it exits with -1.
+   Otherwise, it calls the write function with the provided arguments and stores the result in the eax register. */
 static void
 write_handler (struct intr_frame *f)
 {
@@ -472,6 +478,12 @@ write_handler (struct intr_frame *f)
   f->eax = write(descriptor, buffer, size);
 }
 
+/* Seek System Call Handler:
+   Handles the seek system call, which changes the position within a file.
+   This function retrieves arguments from the interrupt frame and calls the seek function.
+   It also performs a validity check on the file descriptor.
+   If the file descriptor is invalid, it returns -1.
+   Otherwise, it calls the seek function with the provided arguments and stores the result in the eax register. */
 static void
 seek_handler (struct intr_frame *f)
 {
@@ -489,6 +501,10 @@ seek_handler (struct intr_frame *f)
     }
 }
 
+/* Tell System Call Handler:
+   Handles the tell system call, which retrieves the current position within a file.
+   This function retrieves the file descriptor argument from the interrupt frame.
+   It then calls the tell function with the provided file descriptor and stores the result in the eax register. */
 static void
 tell_handler (struct intr_frame *f)
 {
@@ -496,6 +512,12 @@ tell_handler (struct intr_frame *f)
   f->eax = tell (descriptor);
 }
 
+/* Close System Call Handler:
+   Handles the close system call, which closes a file descriptor.
+   This function retrieves the file descriptor argument from the interrupt frame.
+   It then checks if the file descriptor refers to stdin or stdout.
+   If not, it retrieves the file corresponding to the file descriptor using get_file function.
+   If the file exists, it returns 1; otherwise, it returns -1 to indicate failure. */
 static void
 close_handler(struct intr_frame *f)
 {
@@ -507,7 +529,6 @@ close_handler(struct intr_frame *f)
         exit(-1);
     }
     f->eax = (file != NULL ? 1 : -1);
-
 }
 #pragma endregion handlers
 
