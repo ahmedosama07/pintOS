@@ -28,6 +28,7 @@ enum thread_status
    You can redefine this to whatever type you like. */
 typedef int tid_t;
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
+#define TID_INIT  ((tid_t) -2)
 
 /* Thread priorities. */
 #define PRI_MIN 0                       /* Lowest priority. */
@@ -125,10 +126,28 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct thread *parent;
+    struct list children;
+    bool is_child_created;
+    int child_state;
+    tid_t awaited_tid;
+    struct semaphore child_sema;
+    struct semaphore sync;
+    struct list user_files;
+    int exit_code;
+    struct file *exe;
+    struct list_elem child_elem;
 #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+  };
+
+struct user_file
+  {
+    struct list_elem elem;
+    int descriptor;
+    struct file *file;
   };
 
 /* If false (default), use round-robin scheduler.
@@ -182,5 +201,8 @@ void thread_add_to_acquired_locks(struct lock*);
 void thread_remove_from_acquired_locks(struct lock*);
 void bsd_recalc_priority(void);
 void yield_on_max_priority(void);
+
+/* USERPROG. */
+struct thread *child_with_tid(tid_t tid);
 
 #endif /* threads/thread.h */

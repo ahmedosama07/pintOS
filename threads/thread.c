@@ -588,6 +588,22 @@ init_thread (struct thread *t, const char *name, int priority)
   t->recent_cpu = (t == initial_thread ? (real_t){0} : current->recent_cpu);
   t->magic = THREAD_MAGIC;
 
+#ifdef USERPROG
+  sema_init (&t->child_sema, 0);
+  sema_init (&t->sync, 0);
+  list_init (&t->children);
+  list_init (&t->user_files);
+  t->awaited_tid = TID_INIT;
+  t->child_state = -1;
+  t->is_child_created = false;
+  t->exit_code = 0;
+
+  if (t != initial_thread)
+      t->parent = thread_current();
+  else
+      t->parent = NULL;
+#endif
+
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
@@ -762,7 +778,22 @@ inline void is_time_slice_end()
     intr_yield_on_return();
 }
 
-
+struct thread *child_with_tid(tid_t tid)
+{
+  struct thread *current = thread_current();
+  struct list *children = &current->children;
+  struct list_elem *iter = list_begin(children);
+  while (iter != list_end(children))
+  {
+    struct thread *entry = list_entry(iter, struct thread, child_elem);
+    iter = list_next(iter);
+    if (entry->tid == tid)
+    {
+      return entry;
+    }
+  }
+  return NULL;
+}
 
 
 /* Offset of `stack' member within `struct thread'.
