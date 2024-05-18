@@ -572,6 +572,7 @@ init_thread (struct thread *t, const char *name, int priority)
   ASSERT (t != NULL);
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT (name != NULL);
+  struct thread* current = (t == initial_thread ? NULL : thread_current());
 
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
@@ -583,8 +584,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->lock_waiting = NULL;
   list_init(&t->waiters);
   t->sem_list = NULL;
-  t->niceness = (t == initial_thread? 0: thread_current()->niceness);
-  t->recent_cpu = (t == initial_thread? (real_t){0}: thread_current()->recent_cpu);
+  t->niceness = (t == initial_thread ? 0: current->niceness);
+  t->recent_cpu = (t == initial_thread ? (real_t){0} : current->recent_cpu);
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();

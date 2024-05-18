@@ -97,8 +97,7 @@ timer_sleep (int64_t ticks)
     return;
     
   ASSERT (intr_get_level () == INTR_ON);
-  enum intr_level old_level;
-  old_level = intr_disable ();
+  enum intr_level old_level = intr_disable ();
   thread_sleep(timer_ticks() + ticks);
   intr_set_level(old_level);
 }
