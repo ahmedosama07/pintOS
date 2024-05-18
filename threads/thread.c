@@ -239,7 +239,7 @@ thread_create (const char *name, int priority,
   t->niceness = thread_current()->niceness;
   thread_unblock (t);
 
-  yield_on_max_priority();
+  yield_if_not_highest_priority();
 
   return tid;
 }
@@ -450,7 +450,7 @@ thread_set_nice (int nice UNUSED)
   cur->niceness = nice;
   int new_priority = PRI_MAX - to_int(divide_int(thread_current()->recent_cpu, 4)) - (nice * 2);
   thread_current() ->priority = min(PRI_MAX, max(PRI_MIN, new_priority)); 
-  yield_on_max_priority();
+  yield_if_not_highest_priority();
 }
 
 /* Returns the current thread's nice value. */
@@ -745,7 +745,10 @@ thread_priority_compare (const struct list_elem *t1_elem, const struct list_elem
   return is_thread_prior(t1, t2);
 }
 
-/* Return true if lock l1 priority is less than lock l2 priority. */
+/* Return true if lock l1 priority is less than lock l2 priority. 
+   This function is used for comparing the priorities of two locks
+   based on their donated priorities. This is typically used for 
+   ordering locks in a list to manage priority donation. */
 bool 
 locks_priority_comp(const struct list_elem *l1_elem, const struct list_elem *l2_elem, void *aux UNUSED)
 {
@@ -755,8 +758,10 @@ locks_priority_comp(const struct list_elem *l1_elem, const struct list_elem *l2_
   return l1->donated_priority > l2->donated_priority;
 }
 
-
-void yield_on_max_priority(void)
+/* Yield the CPU to the highest priority thread if the current thread
+   does not have the highest priority. This function disables interrupts
+   to safely check the ready list and yield the CPU if needed. */
+void yield_if_not_highest_priority(void)
 {
   if (intr_context()) return;
   enum intr_level old_level = intr_disable();
@@ -765,6 +770,9 @@ void yield_on_max_priority(void)
   intr_set_level(old_level);
 }
 
+/* Return true if thread t1 has a higher priority than thread t2. 
+   This function considers donated priority if it is set, otherwise 
+   it uses the base priority of the threads. */
 bool
 is_thread_prior(const struct thread *t1, const struct thread *t2) {
   int t1_priority = (t1->donated_priority != -1? t1->donated_priority : t1->priority);
@@ -772,6 +780,9 @@ is_thread_prior(const struct thread *t1, const struct thread *t2) {
   return (t1_priority == t2_priority? false : t1_priority > t2_priority);
 }
 
+/* Check if the current time slice has ended and yield the CPU if so.
+   This function is typically called from the timer interrupt handler 
+   to enforce preemption after a certain number of ticks (TIME_SLICE). */
 inline void is_time_slice_end()
 {
   if(thread_ticks == TIME_SLICE)
@@ -779,6 +790,10 @@ inline void is_time_slice_end()
 }
 
 #ifdef USERPROG
+/* Return the child thread of the current thread with the given tid.
+   This function iterates through the list of child threads of the 
+   current thread and returns the thread with the specified tid, or 
+   NULL if no such child thread exists. */
 struct thread *child_with_tid(tid_t tid)
 {
   struct thread *current = thread_current();

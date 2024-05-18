@@ -7,8 +7,8 @@
 /* A counting semaphore. */
 struct semaphore 
   {
-    unsigned value;             /* Current value. */
-    struct list waiters;        /* List of waiting threads. */
+    unsigned value;                     /* Current value. */
+    struct list waiters;                /* List of waiting threads. */
   };
 
 /* One semaphore in a list. */
@@ -28,10 +28,10 @@ void sema_self_test (void);
 /* Lock. */
 struct lock 
   {
-    struct list_elem lockelem;  /* List element for the list of locks held by a thread */
-    int donated_priority;       /* Lock donated priority. */
-    struct thread *holder;      /* Thread holding lock (for debugging). */
-    struct semaphore semaphore; /* Binary semaphore controlling access. */
+    struct list_elem lockelem;        /* List element for the list of locks held by a thread */
+    int donated_priority;             /* Lock donated priority. */
+    struct thread *holder;            /* Thread holding lock (for debugging). */
+    struct semaphore semaphore;       /* Binary semaphore controlling access. */
   };
 
 void lock_init (struct lock *);

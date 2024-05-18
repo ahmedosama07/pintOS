@@ -537,6 +537,10 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
+/* Push command-line arguments onto the stack.
+   This function takes a command-line string and tokenizes it,
+   then places each argument onto the stack in reverse order
+   (as required by the x86 calling convention), with proper alignment. */
 void get_stack_args(char *file_name, void **esp, char **save_ptr)
 {
   void *stack_pointer = *esp;

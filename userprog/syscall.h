@@ -5,27 +5,23 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
-struct lock file_lock;
-
+typedef int pid_t;
 
 void syscall_init (void);
 
-
-
-void halt();
+/* System Calls. */
+void halt(void);
 void exit(int status);
-int create(char * file_name,int initial_size);
-int remove(char * file_name);
-int open(char * file_name);
-int read(int descriptor,char* buffer,unsigned size);
-int write(int fd,char * buffer,unsigned size);
-int close(int fd);
-
-struct user_file *  get_file( int  fd);
-
-bool is_vm_valid (void * name);
-
-
-
+pid_t exec (const char *cmd_line);
+int wait (pid_t pid);
+bool create(const char *file,int initial_size);
+bool remove(const char *file);
+int open(const char * file);
+int filesize (int fd);
+int read(int fd, void* buffer, unsigned size);
+int write(int fd, const void *buffer, unsigned size);
+void seek (int fd, unsigned position);
+unsigned tell (int fd);
+void close(int fd);
 
 #endif /* userprog/syscall.h */

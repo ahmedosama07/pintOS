@@ -28,7 +28,7 @@ enum thread_status
    You can redefine this to whatever type you like. */
 typedef int tid_t;
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
-#define TID_INIT  ((tid_t) -2)
+#define TID_INIT  ((tid_t) -2)          /* Initial value for tid_t. */
 
 /* Thread priorities. */
 #define PRI_MIN 0                       /* Lowest priority. */
@@ -101,53 +101,52 @@ typedef int tid_t;
 struct thread
   {
     /* Owned by thread.c. */
-    tid_t tid;                          /* Thread identifier. */
-    enum thread_status status;          /* Thread state. */
-    char name[16];                      /* Name (for debugging purposes). */
-    uint8_t *stack;                     /* Saved stack pointer. */
-    int priority;                       /* Priority. */
-    int donated_priority;               /* Priority to be donated. */
-    struct list_elem allelem;           /* List element for all threads list. */
+    tid_t tid;                              /* Thread identifier. */
+    enum thread_status status;              /* Thread state. */
+    char name[16];                          /* Name (for debugging purposes). */
+    uint8_t *stack;                         /* Saved stack pointer. */
+    int priority;                           /* Priority. */
+    int donated_priority;                   /* Priority to be donated during priority donation.. */
+    struct list_elem allelem;               /* List element for all threads list. */
+    int64_t wait_ticks;                     /* Number of ticks to be waiting for*/
+    int niceness;                           /* Thread nice value, affecting priority calculations.. */
+    real_t recent_cpu;                      /* CPU time the thread has used recently, used for scheduling.. */
 
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
+    struct list_elem elem;                  /* List element. */
+    struct list waiters;                    /* List of locks held by this thread */
+    struct lock *lock_waiting;              /* Lock that this thread is currently waiting for. */
+    struct condition *wait_cond;            /* Condition variable that the thread is waiting for. */
+    struct semaphore_elem *wait_cond_elem;  /* Semaphore element for the thread waiting on a condition. */
+    struct list *sem_list;                  /* List of semaphores held by this thread. */
 
-    int64_t wait_ticks;                   /* Number of ticks to be waiting for*/
-    struct list waiters;                  /* List of locks held by this thread */
-    struct lock *lock_waiting;            /* Lock this thread is waiting for. */
-    struct condition *wait_cond;          /* Condition the thread is waiting for. */
-    struct semaphore_elem *wait_cond_elem;/* Semaphore element for the thread waiting for condition. */
-
-    struct list *sem_list;
-
-    int niceness;
-    real_t recent_cpu;
+    
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
-    uint32_t *pagedir;                  /* Page directory. */
-    struct thread *parent;
-    struct list children;
-    bool is_child_created;
-    int child_state;
-    tid_t awaited_tid;
-    struct semaphore child_sema;
-    struct semaphore sync;
-    struct list user_files;
-    int exit_code;
-    struct file *exe;
-    struct list_elem child_elem;
+    uint32_t *pagedir;                      /* Page directory. */
+    struct thread *parent;                  /* Parent thread of this thread. */
+    struct list children;                   /* List of child threads created by this thread. */
+    bool is_child_created;                  /* Flag indicating if a child thread was successfully created. */
+    int child_state;                        /* State of the child process. */
+    tid_t awaited_tid;                      /* TID of the child thread that this thread is waiting for. */
+    struct semaphore child_sema;            /* Semaphore for waiting for child thread to exit. */
+    struct semaphore sync;                  /* Semaphore for synchronizing between child thread and parent thread operations. */
+    struct list user_files;                 /* List of files opened by this user thread. */
+    int exit_code;                          /* Exit code of the thread, used when the thread terminates. */
+    struct file *exe;                       /* Executable file of the thread */
+    struct list_elem child_elem;            /* List element for this thread in its parent's children list. */
 #endif
 
     /* Owned by thread.c. */
-    unsigned magic;                     /* Detects stack overflow. */
+    unsigned magic;                         /* Detects stack overflow. */
   };
 
 struct user_file
   {
-    struct list_elem elem;
-    int descriptor;
-    struct file *file;
+    struct list_elem elem;                  /* List element to be used in the list of user files. */
+    int descriptor;                         /* File descriptor for the open file. */
+    struct file *file;                      /* Pointer to the actual file structure. */
   };
 
 /* If false (default), use round-robin scheduler.
@@ -200,7 +199,7 @@ bool locks_priority_comp(const struct list_elem*, const struct list_elem*, void*
 void thread_add_to_acquired_locks(struct lock*);
 void thread_remove_from_acquired_locks(struct lock*);
 void bsd_recalc_priority(void);
-void yield_on_max_priority(void);
+void yield_if_not_highest_priority(void);
 
 /* USERPROG. */
 #ifdef USERPROG
