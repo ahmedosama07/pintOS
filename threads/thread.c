@@ -152,6 +152,7 @@ and insert this thread in blocked_list and block it*/
 void
 thread_sleep (int64_t local_thread_ticks)
 {
+  ASSERT(intr_get_level() == INTR_OFF);
   struct thread *t = thread_current();
   t->wait_ticks = local_thread_ticks;
   list_insert_ordered(&blocked_list, &t->elem, &thread_sleep_compare, NULL);
@@ -238,7 +239,7 @@ thread_create (const char *name, int priority,
   t->niceness = thread_current()->niceness;
   thread_unblock (t);
 
-  yield_on_max_priority();
+  yield_if_not_highest_priority();
 
   return tid;
 }
@@ -449,7 +450,7 @@ thread_set_nice (int nice UNUSED)
   cur->niceness = nice;
   int new_priority = PRI_MAX - to_int(divide_int(thread_current()->recent_cpu, 4)) - (nice * 2);
   thread_current() ->priority = min(PRI_MAX, max(PRI_MIN, new_priority)); 
-  yield_on_max_priority();
+  yield_if_not_highest_priority();
 }
 
 /* Returns the current thread's nice value. */
@@ -571,6 +572,7 @@ init_thread (struct thread *t, const char *name, int priority)
   ASSERT (t != NULL);
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT (name != NULL);
+  struct thread* current = (t == initial_thread ? NULL : thread_current());
 
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
@@ -582,9 +584,25 @@ init_thread (struct thread *t, const char *name, int priority)
   t->lock_waiting = NULL;
   list_init(&t->waiters);
   t->sem_list = NULL;
-  t->niceness = (t == initial_thread? 0: thread_current()->niceness);
-  t->recent_cpu = (t == initial_thread? (real_t){0}: thread_current()->recent_cpu);
+  t->niceness = (t == initial_thread ? 0: current->niceness);
+  t->recent_cpu = (t == initial_thread ? (real_t){0} : current->recent_cpu);
   t->magic = THREAD_MAGIC;
+
+#ifdef USERPROG
+  sema_init (&t->child_sema, 0);
+  sema_init (&t->sync, 0);
+  list_init (&t->children);
+  list_init (&t->user_files);
+  t->awaited_tid = TID_INIT;
+  t->child_state = -1;
+  t->is_child_created = false;
+  t->exit_code = 0;
+
+  if (t != initial_thread)
+      t->parent = thread_current();
+  else
+      t->parent = NULL;
+#endif
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -704,7 +722,7 @@ allocate_tid (void)
 /*To insert sleeping threads ordered using list_insert_ordered 
 as it needs list_less_func * to compare the waiting time and insert*/
 bool
-thread_sleep_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux)
+thread_sleep_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux UNUSED)
 {
   ASSERT(t1_elem != NULL && t2_elem != NULL);
   const struct thread *t1 = list_entry (t1_elem, struct thread, elem);
@@ -718,7 +736,7 @@ thread_sleep_compare (const struct list_elem *t1_elem, const struct list_elem *t
 /*To insert ready threads ordered using list_insert_ordered 
 as it needs list_less_func * to compare the priority and insert*/
 bool
-thread_priority_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux)
+thread_priority_compare (const struct list_elem *t1_elem, const struct list_elem *t2_elem, void *aux UNUSED)
 {
   ASSERT(t1_elem != NULL && t2_elem != NULL);
   const struct thread *t1 = list_entry (t1_elem, struct thread, elem);
@@ -727,7 +745,10 @@ thread_priority_compare (const struct list_elem *t1_elem, const struct list_elem
   return is_thread_prior(t1, t2);
 }
 
-/* Return true if lock l1 priority is less than lock l2 priority. */
+/* Return true if lock l1 priority is less than lock l2 priority. 
+   This function is used for comparing the priorities of two locks
+   based on their donated priorities. This is typically used for 
+   ordering locks in a list to manage priority donation. */
 bool 
 locks_priority_comp(const struct list_elem *l1_elem, const struct list_elem *l2_elem, void *aux UNUSED)
 {
@@ -737,30 +758,59 @@ locks_priority_comp(const struct list_elem *l1_elem, const struct list_elem *l2_
   return l1->donated_priority > l2->donated_priority;
 }
 
-
-void yield_on_max_priority(void)
+/* Yield the CPU to the highest priority thread if the current thread
+   does not have the highest priority. This function disables interrupts
+   to safely check the ready list and yield the CPU if needed. */
+void yield_if_not_highest_priority(void)
 {
+  if (intr_context()) return;
   enum intr_level old_level = intr_disable();
   if(!list_empty(&ready_list) && is_thread_prior(list_entry(list_front(&ready_list), struct thread, elem), thread_current()))
     thread_yield();
   intr_set_level(old_level);
 }
 
+/* Return true if thread t1 has a higher priority than thread t2. 
+   This function considers donated priority if it is set, otherwise 
+   it uses the base priority of the threads. */
 bool
-is_thread_prior(struct thread *t1, struct thread *t2) {
+is_thread_prior(const struct thread *t1, const struct thread *t2) {
   int t1_priority = (t1->donated_priority != -1? t1->donated_priority : t1->priority);
   int t2_priority = (t2->donated_priority != -1? t2->donated_priority : t2->priority);
   return (t1_priority == t2_priority? false : t1_priority > t2_priority);
 }
 
+/* Check if the current time slice has ended and yield the CPU if so.
+   This function is typically called from the timer interrupt handler 
+   to enforce preemption after a certain number of ticks (TIME_SLICE). */
 inline void is_time_slice_end()
 {
   if(thread_ticks == TIME_SLICE)
     intr_yield_on_return();
 }
 
-
-
+#ifdef USERPROG
+/* Return the child thread of the current thread with the given tid.
+   This function iterates through the list of child threads of the 
+   current thread and returns the thread with the specified tid, or 
+   NULL if no such child thread exists. */
+struct thread *child_with_tid(tid_t tid)
+{
+  struct thread *current = thread_current();
+  struct list *children = &current->children;
+  struct list_elem *iter = list_begin(children);
+  while (iter != list_end(children))
+  {
+    struct thread *entry = list_entry(iter, struct thread, child_elem);
+    iter = list_next(iter);
+    if (entry->tid == tid)
+    {
+      return entry;
+    }
+  }
+  return NULL;
+}
+#endif
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */

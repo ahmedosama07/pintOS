@@ -120,7 +120,7 @@ sema_up (struct semaphore *sema)
     thread_unblock(unblocked_thread);
   }
   sema->value++;
-  yield_on_max_priority();
+  yield_if_not_highest_priority();
   intr_set_level (old_level);
 }
 
@@ -357,7 +357,7 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
   
-  waiter.waiting_thread = thread_current();
+  waiter.thread = thread_current();
   thread_current()->wait_cond_elem = &waiter;
   thread_current()->wait_cond = cond;
   sema_init (&waiter.semaphore, 0);
@@ -384,8 +384,8 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
 
   if (!list_empty (&cond->waiters)) {
     struct semaphore_elem *sem = list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem);
-    sem->waiting_thread->wait_cond_elem = NULL;
-    sem->waiting_thread->wait_cond = NULL;
+    sem->thread->wait_cond_elem = NULL;
+    sem->thread->wait_cond = NULL;
     sema_up(&sem->semaphore);
   }
 }
@@ -406,12 +406,15 @@ cond_broadcast (struct condition *cond, struct lock *lock)
     cond_signal (cond, lock);
 }
 
-
+/* Compare the priority of two semaphore elements.
+   This function is used to order semaphore elements based on the 
+   priority of the threads waiting on them. It ensures that higher
+   priority threads are considered first when managing the waiters list. */
 bool 
-semaphore_priority_compare(const struct list_elem *l1_elem, const struct list_elem *l2_elem, void *aux)
+semaphore_priority_compare(const struct list_elem *l1_elem, const struct list_elem *l2_elem, void *aux UNUSED)
 {
   ASSERT(l1_elem != NULL && l2_elem != NULL);
-  struct thread *t1 = list_entry(l1_elem, struct semaphore_elem, elem)->waiting_thread;
-  struct thread *t2 = list_entry(l2_elem, struct semaphore_elem, elem)->waiting_thread;
+  struct thread *t1 = list_entry(l1_elem, struct semaphore_elem, elem)->thread;
+  struct thread *t2 = list_entry(l2_elem, struct semaphore_elem, elem)->thread;
   return is_thread_prior(t1, t2);
 }
