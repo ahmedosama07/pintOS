@@ -1,0 +1,341 @@
+            +--------------------+
+            |        CS 140      |
+            | PROJECT 1: THREADS |
+            |   DESIGN DOCUMENT  |
+            +--------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Ahmed Afefy <es-AhmedAfifi2025@alexu.edu.eg>
+Ziad Elbouriby <es-ziadmohamed2025@alexu.edu.eg>
+Omar Ramadan <es-omarramadan2025@alexu.edu.eg>
+Abdalla Milad <es_abdullah.melad2025@alexu.edu.eg>
+Ziad Eslam <es_zeyad.saber2025@alexu.edu.eg>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+                 ALARM CLOCK
+                 ===========
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+struct thread
+  {
+    /* Owned by thread.c. */
+    tid_t tid;                          /* Thread identifier. */
+    enum thread_status status;          /* Thread state. */
+    char name[16];                      /* Name (for debugging purposes). */
+    uint8_t *stack;                     /* Saved stack pointer. */
+    int priority;                       /* Priority. */
+    int donated_priority;               /* Priority to be donated. */
+    struct list_elem allelem;           /* List element for all threads list. */
+
+    /* Shared between thread.c and synch.c. */
+    struct list_elem elem;              /* List element. */
+
+    int64_t wait_ticks;                   /* Number of ticks to be waiting for*/
+    struct list waiters;                  /* List of locks held by this thread */
+    struct lock *lock_waiting;            /* Lock this thread is waiting for. */
+    struct condition *wait_cond;          /* Condition the thread is waiting for. */
+    struct semaphore_elem *wait_cond_elem;/* Semaphore element for the thread waiting for condition. */
+
+    struct list *sem_list;
+
+    int niceness;
+    real_t recent_cpu;
+
+#ifdef USERPROG
+    /* Owned by userprog/process.c. */
+    uint32_t *pagedir;                  /* Page directory. */
+#endif
+
+    /* Owned by thread.c. */
+    unsigned magic;                     /* Detects stack overflow. */
+  };
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer interrupt handler.
+void
+timer_sleep (int64_t ticks) 
+{
+  if (ticks <= 0)
+    return;
+    
+  ASSERT (intr_get_level () == INTR_ON);
+  enum intr_level old_level = intr_disable ();
+  thread_sleep(timer_ticks() + ticks);
+  intr_set_level(old_level);
+}
+
+void
+thread_sleep (int64_t local_thread_ticks)
+{
+  ASSERT(intr_get_level() == INTR_OFF);
+  struct thread *t = thread_current();
+  t->wait_ticks = local_thread_ticks;
+  list_insert_ordered(&blocked_list, &t->elem, &thread_sleep_compare, NULL);
+  thread_block();
+}
+When calling timer_sleep(int64_t ticks)function it had a busy waiting so it is
+removed and replaced with another function thread_sleep (int64_t local_thread_ticks)
+when a thread is put to sleep for a given number of ticks.
+When calling thread_sleep (int64_t local_thread_ticks), the thread is
+inserted in descending order with respect to its priority into blocked_list. Hence,
+if two threads have wait_ticks set to zero, the one with the highest priority is unblocked first.
+
+>> A3: What steps are taken to minimize the amount of time spent in
+>> the timer interrupt handler?
+static void
+timer_interrupt (struct intr_frame *args UNUSED)
+{
+  ticks++;
+
+  if(thread_mlfqs == BSD_SCHEDULER)
+  {
+    threads_update_statistics((timer_ticks() % TIMER_FREQ) == 0);
+
+    if(timer_ticks() % 4 == 0)
+      bsd_recalc_priority();
+  }
+
+  is_time_slice_end();
+  thread_awake(ticks);
+  thread_tick ();
+}
+
+void
+thread_awake(int64_t ticks)
+{
+  struct thread *t;
+  int max_priority = PRI_MIN;
+  while (!list_empty(&blocked_list) && (t = list_entry(list_front(&blocked_list), struct thread, elem)) && t->wait_ticks <= ticks) {
+    list_remove(&t->elem);
+    thread_unblock(t);
+    max_priority = max(max_priority, (t->donated_priority != -1? t->donated_priority: t->priority));
+  }
+  if(max_priority > thread_get_priority())
+    intr_yield_on_return();
+}
+
+- The handler increments the tick count (ticks) at the beginning of the interrupt. This operation is likely optimized for efficiency,
+as it involves a simple arithmetic operation (ticks++) without significant overhead.
+- Certain operations within the interrupt handler, such as updating statistics and recalculating priorities, are conditionally executed
+based on the scheduling policy (thread_mlfqs == BSD_SCHEDULER). This conditional execution ensures that potentially time-consuming tasks
+are performed only when necessary, minimizing overhead during each interrupt.
+- Priority recalculation is performed periodically (timer_ticks() % 4 == 0), reducing the frequency of this potentially expensive operation.
+By recalculating priorities at intervals, rather than on every tick, the handler reduces the computational burden and improves efficiency.
+- The thread_awake() function is invoked within the interrupt handler to check if any threads are ready to be awakened based on their
+wait time (wait_ticks). This operation iterates over the blocked_list and unblocks threads whose wait time has elapsed, potentially reducing
+the number of threads waiting to be unblocked during subsequent interrupts.
+- After unblocking threads, the handler compares the maximum priority of the unblocked threads with the priority of the currently running 
+thread (thread_get_priority()). If the unblocked threads have higher priority, the handler schedules a yield operation (intr_yield_on_return()),
+allowing higher-priority threads to preempt the current thread efficiently.
+
+---- SYNCHRONIZATION ----
+
+>> A4: How are race conditions avoided when multiple threads call
+>> timer_sleep() simultaneously?
+void
+timer_sleep (int64_t ticks) 
+{
+  if (ticks <= 0)
+    return;
+    
+  ASSERT (intr_get_level () == INTR_ON);
+  enum intr_level old_level = intr_disable ();
+  thread_sleep(timer_ticks() + ticks);
+  intr_set_level(old_level);
+}
+List operations happen during interrupt is disabled. 
+
+>> A5: How are race conditions avoided when a timer interrupt occurs
+>> during a call to timer_sleep()?
+void
+timer_sleep (int64_t ticks) 
+{
+  if (ticks <= 0)
+    return;
+    
+  ASSERT (intr_get_level () == INTR_ON);
+  enum intr_level old_level = intr_disable ();
+  thread_sleep(timer_ticks() + ticks);
+  intr_set_level(old_level);
+}
+With the interrupt disabled during the thread operation, this function is almost
+atomic.
+
+---- RATIONALE ----
+
+>> A6: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+A sleep list was chosen to manage sleeping threads due to its straightforward 
+implementation and alignment with the existing design pattern of the ready list.
+This choice simplifies the implementation process and maintains consistency within
+the system's architecture.
+Opting for a sorted list and inserting threads based on wake-up time order enhances
+efficiency, particularly in scenarios with numerous sleeping threads. This design
+choice facilitates quicker retrieval of threads ready to be awakened, thereby improving
+overall system performance.
+The sleep list is treated as an external static variable, restricting its access to
+designated functions, and promoting safety and maintainability by minimizing the risk of
+unintended modifications or errors.
+While alternative designs were not considered, this approach is believed to be both safe
+and reasonable, offering an efficient solution to manage sleeping threads.
+
+             PRIORITY SCHEDULING
+             ===================
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+struct thread
+  {
+    /* Owned by thread.c. */
+    tid_t tid;                          /* Thread identifier. */
+    enum thread_status status;          /* Thread state. */
+    char name[16];                      /* Name (for debugging purposes). */
+    uint8_t *stack;                     /* Saved stack pointer. */
+    int priority;                       /* Priority. */
+    int donated_priority;               /* Priority to be donated. */
+    struct list_elem allelem;           /* List element for all threads list. */
+
+    /* Shared between thread.c and synch.c. */
+    struct list_elem elem;              /* List element. */
+
+    int64_t wait_ticks;                   /* Number of ticks to be waiting for*/
+    struct list waiters;                  /* List of locks held by this thread */
+    struct lock *lock_waiting;            /* Lock this thread is waiting for. */
+    struct condition *wait_cond;          /* Condition the thread is waiting for. */
+    struct semaphore_elem *wait_cond_elem;/* Semaphore element for the thread waiting for condition. */
+
+    struct list *sem_list;
+
+    int niceness;
+    real_t recent_cpu;
+
+#ifdef USERPROG
+    /* Owned by userprog/process.c. */
+    uint32_t *pagedir;                  /* Page directory. */
+#endif
+
+    /* Owned by thread.c. */
+    unsigned magic;                     /* Detects stack overflow. */
+  };
+
+
+>> B2: Explain the data structure used to track priority donation.
+>> Use ASCII art to diagram a nested donation.  (Alternately, submit a
+>> .png file.)
+
+---- ALGORITHMS ----
+
+>> B3: How do you ensure that the highest priority thread waiting for
+>> a lock, semaphore, or condition variable wakes up first?
+
+>> B4: Describe the sequence of events when a call to lock_acquire()
+>> causes a priority donation.  How is nested donation handled?
+
+>> B5: Describe the sequence of events when lock_release() is called
+>> on a lock that a higher-priority thread is waiting for.
+
+---- SYNCHRONIZATION ----
+
+>> B6: Describe a potential race in thread_set_priority() and explain
+>> how your implementation avoids it.  Can you use a lock to avoid
+>> this race?
+
+---- RATIONALE ----
+
+>> B7: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+
+              ADVANCED SCHEDULER
+              ==================
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+---- ALGORITHMS ----
+
+>> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each
+>> has a recent_cpu value of 0.  Fill in the table below showing the
+>> scheduling decision and the priority and recent_cpu values for each
+>> thread after each given number of timer ticks:
+
+timer  recent_cpu    priority   thread
+ticks   A   B   C   A   B   C   to run
+-----  --  --  --  --  --  --   ------
+ 0
+ 4
+ 8
+12
+16
+20
+24
+28
+32
+36
+
+>> C3: Did any ambiguities in the scheduler specification make values
+>> in the table uncertain?  If so, what rule did you use to resolve
+>> them?  Does this match the behavior of your scheduler?
+
+>> C4: How is the way you divided the cost of scheduling between code
+>> inside and outside interrupt context likely to affect performance?
+
+---- RATIONALE ----
+
+>> C5: Briefly critique your design, pointing out advantages and
+>> disadvantages in your design choices.  If you were to have extra
+>> time to work on this part of the project, how might you choose to
+>> refine or improve your design?
+
+>> C6: The assignment explains arithmetic for fixed-point math in
+>> detail, but it leaves it open to you to implement it.  Why did you
+>> decide to implement it the way you did?  If you created an
+>> abstraction layer for fixed-point math, that is, an abstract data
+>> type and/or a set of functions or macros to manipulate fixed-point
+>> numbers, why did you do so?  If not, why not?
+
+               SURVEY QUESTIONS
+               ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?

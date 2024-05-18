@@ -1,0 +1,424 @@
+             +--------------------------+
+             |          CS 140          |
+             | PROJECT 2: USER PROGRAMS |
+             |     DESIGN DOCUMENT      |
+             +--------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Ahmed Afefy <es-AhmedAfifi2025@alexu.edu.eg>
+Ziad Elbouriby <es-ziadmohamed2025@alexu.edu.eg>
+Omar Ramadan <es-omarramadan2025@alexu.edu.eg>
+Abdalla Milad <es_abdullah.melad2025@alexu.edu.eg>
+Ziad Eslam <es_zeyad.saber2025@alexu.edu.eg>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+               ARGUMENT PASSING
+               ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+- In thread.h
+struct thread
+  {
+    /* Owned by thread.c. */
+    tid_t tid;                              /* Thread identifier. */
+    enum thread_status status;              /* Thread state. */
+    char name[16];                          /* Name (for debugging purposes). */
+    uint8_t *stack;                         /* Saved stack pointer. */
+    int priority;                           /* Priority. */
+    int donated_priority;                   /* Priority to be donated during priority donation.. */
+    struct list_elem allelem;               /* List element for all threads list. */
+    int64_t wait_ticks;                     /* Number of ticks to be waiting for*/
+    int niceness;                           /* Thread nice value, affecting priority calculations.. */
+    real_t recent_cpu;                      /* CPU time the thread has used recently, used for scheduling.. */
+
+    /* Shared between thread.c and synch.c. */
+    struct list_elem elem;                  /* List element. */
+    struct list waiters;                    /* List of locks held by this thread */
+    struct lock *lock_waiting;              /* Lock that this thread is currently waiting for. */
+    struct condition *wait_cond;            /* Condition variable that the thread is waiting for. */
+    struct semaphore_elem *wait_cond_elem;  /* Semaphore element for the thread waiting on a condition. */
+    struct list *sem_list;                  /* List of semaphores held by this thread. */
+
+    
+
+#ifdef USERPROG
+    /* Owned by userprog/process.c. */
+    uint32_t *pagedir;                      /* Page directory. */
+    struct thread *parent;                  /* Parent thread of this thread. */
+    struct list children;                   /* List of child threads created by this thread. */
+    bool is_child_created;                  /* Flag indicating if a child thread was successfully created. */
+    int child_state;                        /* State of the child process. */
+    tid_t awaited_tid;                      /* TID of the child thread that this thread is waiting for. */
+    struct semaphore child_sema;            /* Semaphore for waiting for child thread to exit. */
+    struct semaphore sync;                  /* Semaphore for synchronizing between child thread and parent thread operations. */
+    struct list user_files;                 /* List of files opened by this user thread. */
+    int exit_code;                          /* Exit code of the thread, used when the thread terminates. */
+    struct file *exe;                       /* Executable file of the thread */
+    struct list_elem child_elem;            /* List element for this thread in its parent's children list. */
+#endif
+
+    /* Owned by thread.c. */
+    unsigned magic;                         /* Detects stack overflow. */
+  };
+
+struct user_file
+  {
+    struct list_elem elem;                  /* List element to be used in the list of user files. */
+    int descriptor;                         /* File descriptor for the open file. */
+    struct file *file;                      /* Pointer to the actual file structure. */
+  };
+
+  In syscall.h
+  typedef int pid_t;
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?
+
+1. Argument Passing
+    In process_execute (const char *file_name), file_name includes 
+    the full command (proram name and its arguments). Hence, it is
+    used as thread's name and it is being passed to start_process (void *file_name_)
+    and load (const char *file_name, void (**eip) (void), void **esp).
+    Thus, ELF executable is being loaded into the current thread and the
+    entry point (eip) and the initial stack pointer (esp) are being set for
+    the user process. Afterwards, the command and stack pointer are pushed into the stack.
+2. Elements of argv[]
+    The argument string is being scanned reversely. Thus the last argument is fetched first, hence
+    the first argument becomes the last token and accordingly the stack pointer is decremented
+    with every itteration.
+3. Stack page overflow
+    In setup_stack (void **esp) , the stack pointer is being initialized. This ensures that the stack
+    starts at a known location with enough space for program execution. 
+    In get_stack_args(char *file_name, void **esp, char **save_ptr), the command line
+    is being tokenized and each token is placed onto the stack in reverse order. Moreover, the size
+    of all arguments is calculated and aligned with the stack pointer to avoid any waste of stack space.
+    Despite, all that if esp overflows until it fails, a page fault exception is handled with exit (-1)
+    whenever the address is invalid.
+    
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+    strtok_r() is similar to strtok(). However, it takes an extra argument, a pointer
+    to a character pointer pointing to the position of the next token.
+
+>> A4: In Pintos, the kernel separates commands into a executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+    - Users can combine different executables with various arguments to create complex
+    commands or multiple commands in a single command line.
+    - Checking the arguments validity before passing it to the kernel avoiding kernel
+    failure.
+
+                 SYSTEM CALLS
+                 ============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+    - In syscall.c
+    struct lock file_lock;
+    file_lock is used to synchronize file writing among different processes.
+
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+    Each process have a list of files allowing for maintainance of open files
+    by the current process (thread). Thus, the file descriptoris not unique 
+    among files. Hence, a particular file may be open by two different processes
+    having different descriptors, each is unique within its process.
+
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+/* Read System Call:
+   Reads from the file descriptor into the buffer.
+   This function handles reading from standard input (descriptor 0) and file reads. */
+int
+read(int fd, void* buffer, unsigned size) 
+{
+  int eax = size;
+  if (fd == STDIN_FILENO)
+    {
+      while (size--)
+      {
+        lock_acquire (&file_lock);
+        char c = input_getc ();
+        lock_release (&file_lock);
+        buffer += c;
+      }
+    }
+
+  struct user_file *user_file = get_file (fd);
+  if (user_file == NULL)
+      eax = -1;
+  else
+    {
+      struct file *file = user_file->file;
+      lock_acquire (&file_lock);
+      size = file_read (file, buffer, size);
+      lock_release (&file_lock);
+    }
+  return eax;
+}
+
+/* Write System Call:
+   Writes to the file descriptor from the buffer.
+   This function handles writing to standard output (descriptor 1) and file writes. */
+int
+write (int fd, const void *buffer, unsigned size)
+{
+  int eax = size;
+  if (fd == STDOUT_FILENO)
+    {
+      lock_acquire(&file_lock);
+      putbuf(buffer, size);
+      lock_release(&file_lock);
+    }
+  struct user_file *file = get_file(fd);
+  if (file == NULL)
+    eax = -1;
+  else
+    {
+      lock_acquire(&file_lock);
+      eax = file_write(file->file, buffer, size);
+      lock_release(&file_lock);
+    }
+    return eax;
+}
+
+/* Read Handler:
+   Handles the read system call, reading data from the file descriptor into the buffer.
+   This function verifies the validity of the descriptor and buffer arguments,
+   and calls the read() function to perform the actual read operation.
+   It sets the return value of the read system call to the result of the read() function. */
+static void
+read_handler (struct intr_frame *f)
+{
+    int descriptor = (int)(*((int *)f->esp + 1));
+    char *buffer = (char *)(*((int *)f->esp + 2));
+    if (descriptor == STDOUT_FILENO || !is_vm_valid(buffer))
+        exit(-1);
+    unsigned size = *((unsigned *)f->esp + 3);
+    f->eax = read(descriptor, buffer, size);
+}
+
+/* Write System Call Handler:
+   Handles the write system call, which writes data to a file descriptor.
+   This function retrieves arguments from the interrupt frame and passes them to the write function.
+   It also performs validity checks on the buffer pointer and the file descriptor.
+   If the buffer pointer is invalid or the file descriptor is for standard input (0), it exits with -1.
+   Otherwise, it calls the write function with the provided arguments and stores the result in the eax register. */
+static void
+write_handler (struct intr_frame *f)
+{
+  int descriptor = *((int *)f->esp + 1);
+  char *buffer = (char *)(*((int *)f->esp + 2));
+  if (!is_vm_valid(buffer) || descriptor == STDIN_FILENO)
+      exit(-1);
+  unsigned size = (unsigned)(*((int *)f->esp + 3));
+  f->eax = write(descriptor, buffer, size);
+}
+
+    # Reading
+    The file descriptor, buffer and size are retrieved from the stack.
+    Afterwards, buffer is checked to be valid. If the descriptor corresponds
+    to STDIN, otherwise the program terminates. For synchronization, a lock, 
+    file_lock, is acquired for reading file using 
+    file_read (struct file *file, void *buffer, off_t size). 
+    Unless, the file is STDIN it is read using input_getc (void).
+    Afterwards, the lock is released.
+
+    #writing
+    The file descriptor, buffer and size are retrieved from the stack.
+    Afterwards, buffer is checked to be valid. If the descriptor corresponds
+    to STDOUT, otherwise the program terminates. For synchronization, a lock, 
+    file_lock, is acquired for writing file using 
+    file_write (struct file *file, const void *buffer, off_t size).
+    Unless, the file is STDOUT it is written using void putbuf (const char *, size_t).
+    Afterwards, the lock is released.
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+    # For a full page (4,096 bytes) of data:
+        - The minimum number of inspections is 1. If the entire data 
+        fits within a single page and is contiguous, only one inspection
+        is needed to verify its presence.
+        - The maximum number of inspections is 4,096. This occurs when
+        the data is scattered across non-contiguous pages, necessitating
+        a separate inspection for each byte.
+    # For 2 bytes of data:
+        - The minimum number of inspections remains 1, assuming both 
+        bytes are located within the same page.
+        - The maximum number of inspections is 2 if the bytes span across
+        two separate pages.
+    While the nature of non-contiguous data poses challenges for optimization,
+    there's room for improvement by optimizing page allocation strategies. 
+    Maximizing data placement within contiguous pages can reduce the number of
+    inspections required, especially for larger data transfers. This optimization
+    can minimize the overhead associated with page table inspections.
+
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+    In the "wait" system call implementation, when a parent thread calls wait with
+    the pid of a child process, it sets the awaited_tid of the parent thread to the
+    pid of the child. Then, it searches for the child thread using the child_with_tid
+    function. If the child is found, it removes the child from the list of children 
+    of the parent, signals the child's synchronization semaphore to allow it to terminate,
+    and waits for the child's synchronization semaphore to be up, indicating that the child
+    has exited. Finally, it returns the exit status of the child process.
+    This interaction ensures that the parent process waits for the child process to terminate
+    before proceeding, allowing synchronization between parent and child processes. Once the
+    child process exits, its exit status is retrieved and returned to the parent process,
+    completing the "wait" system call.
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+    - For this part of the phase Our design depends on having a multiple of system
+    call handlers that handles the type of system call inside 
+    static void syscall_handler (struct intr_frame *). 
+    This syscall handler at the beginning validates the pointer
+    to the stack of the interrupt frame that currently holding the data of the
+    executing thread. Afterwards, the top of the stack identifying the system call
+    is fetched and corresponding handler is called.
+    - An example of this strategy in action could involve a "write" system call.
+    Before reading the system call number and its arguments from the user stack,
+    the syscall handler first verifies the validity of the stack pointer. If a bad
+    pointer is detected during any stage of argument retrieval or data access,
+    the process is terminated, and all resources associated with the failed operation
+    are freed to prevent resource leaks. Additionally, error codes or messages may be
+    returned to indicate the nature of the error to the user space for further handling.
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+    The child load status is recorded in the parent's thread using two flags, is_child_created
+    and child_state. By storing this information in the parent thread rather than the child,
+    we ensure that it remains accessible even if the child exits unexpectedly. This design choice
+    addresses the possibility of the child thread exiting before the parent has a chance to check its status.
+
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+struct list *children = &thread_current ()->children;
+  struct list_elem *iter = list_begin (children);
+  while (iter != list_end (children))
+    {
+      struct thread *child = list_entry (iter, struct thread, child_elem);
+      iter = list_next (iter);
+      child->parent = NULL;
+      sema_up (&child->sync);
+      list_remove (&child->child_elem);
+    }
+
+Child is responsible to set its state in parent's thread. When a parent terminates,
+it frees its children list.
+
+- P calls wait(C) after C exits:
+P will acquire the monitor and found out C already exits and check it’s exit
+status directly.
+
+- P calls wait(C) before C exits:
+P will acquire the monitor and wait until it exits by checking the child
+thread’s existence through child_with_tid(tid_t tid), which checks
+all-thread-list. Then parent retrieves the child’s exit status.
+
+- P terminates without waiting before C exits:
+The list inside P will be free, the lock and resources will be released, since
+no one will wait a signal except parent, condition don’t need to be signaled.
+When C tries to set it’s status and find out parent has exited, it will ignore it 
+and continue to execute.
+
+- P terminates after C exits:
+The same thing happen to P, which is free all the resources P has.
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+We chose to check only that the pointer is below PHYS_BASE and deference the
+pointer using the get_user() method. In the Pintos manual, it is said that this
+method is faster than the method that verifies the validity of the user-provided
+pointer, so we chose to implement this way. This method did not seem too
+complicated, and since it is the faster option of the two, it seemed to be a
+better choice.
+
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+    # Advantages:
+        - Thread-struct’s space is minimized
+        - Kernel is aware of all the open files, which gains more flexibility to manipulate 
+        the opened files.
+    # Disadvantages:
+        - Consumes kernel space, user program may open lots of files to crash thekernel.
+        - The inherits of open files opened by a parent require extra effort to be implemented.
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+
+               SURVEY QUESTIONS
+               ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
