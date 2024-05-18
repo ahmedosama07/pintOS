@@ -203,6 +203,8 @@ void bsd_recalc_priority(void);
 void yield_on_max_priority(void);
 
 /* USERPROG. */
+#ifdef USERPROG
 struct thread *child_with_tid(tid_t tid);
+#endif
 
 #endif /* threads/thread.h */

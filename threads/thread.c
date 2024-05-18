@@ -778,6 +778,7 @@ inline void is_time_slice_end()
     intr_yield_on_return();
 }
 
+#ifdef USERPROG
 struct thread *child_with_tid(tid_t tid)
 {
   struct thread *current = thread_current();
@@ -794,7 +795,7 @@ struct thread *child_with_tid(tid_t tid)
   }
   return NULL;
 }
-
+#endif
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
