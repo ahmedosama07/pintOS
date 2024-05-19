@@ -238,32 +238,93 @@ struct thread
     unsigned magic;                     /* Detects stack overflow. */
   };
 
+In synch.h
+struct semaphore_elem 
+  {
+    struct list_elem elem;              /* List element. */
+    struct semaphore semaphore;         /* This semaphore. */
+    struct thread* waiting_thread;      /* Waiting thread. */
+  };
+struct lock 
+  {
+    struct thread *holder;      /* Thread holding lock (for debugging). */
+    struct semaphore semaphore; /* Binary semaphore controlling access. */
+    struct list_elem lockelem;  /* List element for the list of locks held by a thread */
+    int donated_priority;       /* Lock donated priority. */
+  };
+
 
 >> B2: Explain the data structure used to track priority donation.
 >> Use ASCII art to diagram a nested donation.  (Alternately, submit a
 >> .png file.)
+Priority donation is tracked using nested locks where each thread can hold
+a list of locks. Each lock keeps track of its own donated priority. 
+Threads waiting on a lock can donate their priority to the lock holder,
+and this donation can propagate through a chain of locks.
+
+Thread A (priority 50) -> waiting on Lock X
+Thread B (priority 40) -> holds Lock X, waiting on Lock Y
+Thread C (priority 30) -> holds Lock Y, waiting on Lock Z
+Thread D (priority 20) -> holds Lock Z
+
+When Thread A attempts to acquire Lock X, Thread B’s priority
+is temporarily raised to 50. This donation continues through the
+chain of locks, ultimately raising Thread D’s effective priority
+to 50 until Thread A no longer needs Lock X.
+Thread A -> Lock X -> Thread B -> Lock Y -> Thread C -> Lock Z -> Thread D
 
 ---- ALGORITHMS ----
 
 >> B3: How do you ensure that the highest priority thread waiting for
 >> a lock, semaphore, or condition variable wakes up first?
+To ensure the highest priority thread wakes up first:
+- Semaphores: Use list_insert_ordered to insert threads into the semaphore's
+waiters list based on priority.
+- Locks: When a lock is released, the semaphore's waiters list is checked, and
+the highest priority thread is unblocked first.
+- Condition Variables: Use list_insert_ordered for condition variables to 
+maintain the waiters list in priority order.
 
 >> B4: Describe the sequence of events when a call to lock_acquire()
 >> causes a priority donation.  How is nested donation handled?
+- Thread T1 (high priority) attempts to acquire a lock held by Thread T2 (lower priority).
+- Thread T1 donates its priority to Thread T2.
+- Thread T2 is now effectively running at Thread T1's priority.
+- If Thread T2 is also waiting on another lock held by Thread T3, the donation propagates to Thread T3.
+- This continues until the chain is resolved, ensuring the highest priority thread is not unduly delayed.
 
 >> B5: Describe the sequence of events when lock_release() is called
 >> on a lock that a higher-priority thread is waiting for.
+- Thread T1 releases a lock.
+- The lock’s priority donation is reset.
+- Thread T1 recalculates its donated priority based on other locks it holds.
+- The highest priority thread from the semaphore’s waiters list is unblocked.
+- The unblocked thread preempts if its priority is higher than the current running thread.
 
 ---- SYNCHRONIZATION ----
 
 >> B6: Describe a potential race in thread_set_priority() and explain
 >> how your implementation avoids it.  Can you use a lock to avoid
 >> this race?
+# Race condition
+- When changing the priority of a running thread, another thread might simultaneously donate
+priority due to lock acquisition.
+
+# Avoidance
+- Disabled interrupts: Ensure atomic access to thread priority.
+- Avoid locks: Using locks inside thread_set_priority can lead to deadlocks, so disabling interrupts is a safer approach.
 
 ---- RATIONALE ----
 
 >> B7: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+# Chosen Design
+- Priority donation through nested locks with lists tracking locks and priorities.
+- Use of ordered lists for semaphores and condition variables to manage waiting threads.
+
+# Superiority
+- Efficiency: Minimizes context switching and ensures highest priority tasks are addressed promptly.
+- Simplicity: Using list operations to manage priorities is straightforward and integrates well with existing Pintos structures.
 
               ADVANCED SCHEDULER
               ==================
@@ -284,23 +345,37 @@ struct thread
 timer  recent_cpu    priority   thread
 ticks   A   B   C   A   B   C   to run
 -----  --  --  --  --  --  --   ------
- 0
- 4
- 8
-12
-16
-20
-24
-28
-32
-36
+ 0      0   0   0  63  61  59     A
+ 4      4   0   0  62  61  59     A
+ 8      8   0   0  61  61  59     B
+12      8   4   0  61  60  59     A
+16     12   4   0  60  60  59     B
+20     12   8   0  60  59  59     A
+24     16   8   0  59  59  59     C
+28     16   8   4  59  59  58     B
+32     16  12   4  59  58  58     A
+36     20  12   4  58  58  58     C
 
 >> C3: Did any ambiguities in the scheduler specification make values
 >> in the table uncertain?  If so, what rule did you use to resolve
 >> them?  Does this match the behavior of your scheduler?
+# Ambiguity
+- How frequently priorities should be recalculated.
+
+# Resolution
+- Priorities are recalculated based on the system tick frequency, aligned 
+with the given rules in the Pintos project documentation.
+
 
 >> C4: How is the way you divided the cost of scheduling between code
 >> inside and outside interrupt context likely to affect performance?
+# Interrupt context
+- Scheduling decisions are made to ensure real-time responsiveness.
+- Frequent context switches in interrupt context could degrade performance.
+
+# Non-interrupt context
+- Heavy computations and updates to data structures are handled here to avoid 
+slowing down interrupt handling.
 
 ---- RATIONALE ----
 
@@ -308,6 +383,20 @@ ticks   A   B   C   A   B   C   to run
 >> disadvantages in your design choices.  If you were to have extra
 >> time to work on this part of the project, how might you choose to
 >> refine or improve your design?
+# Advantages:
+- Responsiveness: Ensures high-priority tasks are not delayed.
+- Efficiency: Limits the scope of changes to priority donation paths.
+
+# Disadvantages:
+- Complexity: Priority donation and nested donation logic can be intricate.
+- Overhead: Maintaining ordered lists and recalculating priorities adds 
+computational overhead.
+
+# Improvements:
+- Refine Priority Calculation: Optimize the frequency and method of recalculating
+priorities to balance load.
+- Simplify Data Structures: Investigate alternate data structures that may simplify
+the logic while maintaining efficiency.
 
 >> C6: The assignment explains arithmetic for fixed-point math in
 >> detail, but it leaves it open to you to implement it.  Why did you
@@ -315,6 +404,40 @@ ticks   A   B   C   A   B   C   to run
 >> abstraction layer for fixed-point math, that is, an abstract data
 >> type and/or a set of functions or macros to manipulate fixed-point
 >> numbers, why did you do so?  If not, why not?
+# Implementation Approach
+The fixed-point arithmetic implementation using an abstract data type and inline
+functions balances performance and maintainability, ensuring clean, readable, and
+modifiable scheduling logic in Pintos.
+The fixed-point arithmetic was implemented using an abstract data type (real_t) and
+a set of inline functions to perform arithmetic operations. This approach offers several
+advantages:
+- Encapsulation and abstraction
+  * The real_t structure encapsulates the fixed-point representation, hiding the 
+  implementation details from the rest of the code.
+  * Functions like to_real, to_int, and round_real provide a clear interface for converting
+  between integers and fixed-point numbers.
+- Inline Functions for Performance:
+  * Using static inline functions ensures that the arithmetic operations are inlined by the compiler,
+  eliminating function call overhead.
+  * Inline functions allow type checking and prevent the pitfalls of using macros.
+- Comprehensive Set of Operations:
+  * The set of functions covers all necessary arithmetic operations, including addition, subtraction, 
+  multiplication, and division of fixed-point numbers, as well as operations involving integers.
+
+# Why an Abstraction Layer?
+  - Simplified Code Maintenance:
+    * With a clear abstraction layer, any changes to the fixed-point arithmetic implementation can be 
+    made in one place.
+    * The abstraction layer ensures consistent arithmetic rules across the codebase.
+  - Enhanced Readability and Debugging:
+    * Named functions make the purpose of each operation explicit, improving code readability and ease 
+    of debugging.
+    * Descriptive function names clarify the intention behind each calculation.
+  - Flexibility and Extensibility:
+    * The abstraction layer makes it easy to extend the fixed-point arithmetic library with additional
+    operations if needed.
+    * Performance optimizations or additional features can be added to the fixed-point functions without
+    affecting the rest of the scheduler code.
 
                SURVEY QUESTIONS
                ================
